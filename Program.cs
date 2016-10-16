@@ -5,7 +5,6 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
-using System.Threading;
 
 namespace jClipCornLink
 {
@@ -19,6 +18,8 @@ namespace jClipCornLink
 		private static readonly Regex REGEX_DRIVELETTER = new Regex(@"<\?vLetter=""(?<param>[A-Z])"">");
 		private static readonly Regex REGEX_SELFPATH    = new Regex(@"<\?self>");
 		private static readonly Regex REGEX_SELFDRIVE   = new Regex(@"<\?self\[dir\]>");
+		private static readonly Regex REGEX_DYN_VERSION = new Regex(@"^\{VERSION\-(?<index>[0-9]+)\}$");
+		private static readonly Regex REGEX_DYNAMIC     = new Regex(@"\{.*?\}");
 
 		private static readonly string SELF_PATH = Directory.GetCurrentDirectory();
 		private static readonly string SELF_DRIVE = Directory.GetDirectoryRoot(Directory.GetCurrentDirectory());
@@ -47,10 +48,7 @@ namespace jClipCornLink
 			Directory.CreateDirectory(Directory.GetParent(PATH_LOG).FullName);
 			if (!File.Exists(PATH_LOG)) File.WriteAllText(PATH_LOG, string.Empty);
 
-			var lines = File.ReadAllLines(PATH_CONFIG)
-				.Where(p => !string.IsNullOrWhiteSpace(p))
-				.Where(p => ! p.StartsWith("#"))
-				.ToList();
+			var lines = File.ReadAllLines(PATH_CONFIG).ToList();
 
 			if (!lines.Any())
 			{
@@ -58,43 +56,36 @@ namespace jClipCornLink
 				return;
 			}
 
-			foreach (var path in lines)
+			string rule;
+			var file = FindPath(lines, out rule);
+
+			if (file != null)
 			{
-				string file = ResolvePath(path);
-
-				if (File.Exists(file))
+				if (file.EndsWith(".jar"))
 				{
-					if (file.EndsWith(".jar"))
+					Process.Start(new ProcessStartInfo("java.exe", "-jar \"" + file + "\"")
 					{
-						Process.Start(new ProcessStartInfo("java.exe", "-jar \"" + file + "\"")
-						{
-							CreateNoWindow = true,
-							UseShellExecute = false,
+						CreateNoWindow = true,
+						UseShellExecute = false,
 
-							WorkingDirectory = Directory.GetParent(file).FullName,
-						});
+						WorkingDirectory = Directory.GetParent(file).FullName,
+					});
 
-						WriteLogInfo(string.Format("Start jClipCorn (jar): '{0}' (configured path: '{1}')", file, path));
-						return;
-					}
-					if (file.EndsWith(".exe"))
-					{
-						Process.Start(new ProcessStartInfo(file)
-						{
-							WorkingDirectory = Directory.GetParent(file).FullName,
-						});
-
-						WriteLogInfo(string.Format("Start jClipCorn (exe): '{0}' (configured path: '{1}')", file, path));
-						return;
-					}
-
-					WriteLogError(string.Format("Unknown extension: '{0}' (configured path: '{1}')", file, path));
+					WriteLogInfo(string.Format("Start jClipCorn (jar): '{0}' (configured path: '{1}')", file, rule));
+					return;
 				}
-				else
+				if (file.EndsWith(".exe"))
 				{
-					WriteLogError(string.Format("File not found: '{0}' (configured path: '{1}')", file, path));
+					Process.Start(new ProcessStartInfo(file)
+					{
+						WorkingDirectory = Directory.GetParent(file).FullName,
+					});
+
+					WriteLogInfo(string.Format("Start jClipCorn (exe): '{0}' (configured path: '{1}')", file, rule));
+					return;
 				}
 
+				WriteLogError(string.Format("Unknown extension: '{0}' (configured path: '{1}')", file, rule));
 			}
 
 			WriteLogError("Unable to locate jClipCorn - exiting");
@@ -123,6 +114,131 @@ namespace jClipCornLink
 			relPath = REGEX_DRIVENAME.Replace(relPath, m => DRIVES.FirstOrDefault(p => p.VolumeLabel.ToLower() == m.Groups["param"].Value.ToLower())?.Name ?? "(?ERR DRIVE NOT FOUND?)");
 
 			return relPath;
+		}
+
+		private static string ResolveDynamics(string file)
+		{
+			int idxS = file.LastIndexOf('\\');
+			int idxE = file.LastIndexOf('.');
+
+			if (idxS == -1 || idxE == -1 || idxE <= idxS) return null;
+
+			string path = file.Substring(0, idxS + 1);
+			string filename = file.Substring(idxS + 1, idxE - idxS - 1);
+			string extension = file.Substring(idxE + 1);
+			
+			if (filename.Contains("{") && filename.Contains("}"))
+			{
+				var dynamics = ListDynamicInString(filename);
+
+				string pattern = CreateDynamicsPattern(filename, extension, dynamics);
+				var rex = CreateDynamicsRegex(filename, extension, dynamics);
+
+				var foundTuples = new List<Tuple<string, string>>();
+
+				foreach (var foundFile in Directory.EnumerateFiles(path, pattern))
+				{
+					string fn = Path.GetFileName(foundFile);
+
+					if (fn == null) continue;
+
+					var match = rex.Item1.Match(fn);
+
+					if (!match.Success) continue;
+
+					string v = string.Join(":", dynamics.Select(d => match.Groups[rex.Item2[d]].Value).Select(int.Parse).Select(p => string.Format("{0:00000000}", p)));
+
+					foundTuples.Add(Tuple.Create(foundFile, v));
+				}
+
+				if (! foundTuples.Any()) return null;
+
+				return foundTuples.OrderByDescending(p => p.Item2).First().Item1;
+			}
+			else
+			{
+				return file;
+			}
+		}
+
+		private static Tuple<Regex, Dictionary<string, string>> CreateDynamicsRegex(string filename, string extension, List<string> dynamics)
+		{
+			var dict = new Dictionary<string, string>();
+
+			filename = filename.Replace(".", "\\.");
+
+			int idxId = 1;
+			foreach (var dnmic in dynamics)
+			{
+				string g = "GROUP_" + (idxId++);
+				filename = filename.Replace(dnmic, string.Format("(?<{0}>[0-9]+)", g));
+
+				dict.Add(dnmic, g);
+			}
+
+			var rex = "^" + filename + "\\." + extension + "$";
+
+			try
+			{
+				return Tuple.Create(new Regex(rex), dict);
+			}
+			catch (Exception)
+			{
+				WriteLogError("Cannot create Regex: " + rex);
+				return null;
+			}
+		}
+
+		private static string CreateDynamicsPattern(string filename, string extension, List<string> dynamics)
+		{
+			return dynamics.Aggregate(filename, (current, dnmic) => current.Replace(dnmic, "*")) + "." + extension;
+		}
+
+		private static List<string> ListDynamicInString(string str)
+		{
+			List<string> result = new List<string>();
+
+			foreach (Match match in REGEX_DYNAMIC.Matches(str))
+			{
+				string dmic = match.Value;
+
+				if (!REGEX_DYN_VERSION.IsMatch(dmic))
+				{
+					WriteLogError("Unknown dynamic component: " + dmic);
+				}
+				else
+				{
+					result.Add(dmic);
+				}
+			}
+
+			return result.OrderByDescending(p => int.Parse(REGEX_DYN_VERSION.Match(p).Groups["index"].Value)).ToList();
+		} 
+
+		private static String FindPath(List<string> rules, out string foundrule)
+		{
+			foreach (var rule in rules)
+			{
+				if (string.IsNullOrWhiteSpace(rule)) continue;
+
+				if (rule.Trim().StartsWith("#") || rule.Trim().StartsWith("//") || rule.Trim().StartsWith(";")) continue;
+
+				var file = ResolvePath(rule);
+				var priorityFile = ResolveDynamics(file);
+
+				if (priorityFile != null)
+				{
+					foundrule = rule;
+					return priorityFile;
+				}
+				else
+				{
+					WriteLogError(string.Format("File not found: '{0}' (configured path: '{1}')", file, rule));
+				}
+			}
+
+			foundrule = null;
+			return null;
 		}
 	}
 }
