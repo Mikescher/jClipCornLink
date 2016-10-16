@@ -10,9 +10,6 @@ I use this to pin jClipCorn to the Windows7 taskbar (otherwise it is sometimes a
 Feel free to do whatever you want with it
 
 
-
-
-
 ##Example jClipCornLink.cfg file
 
 ~~~
@@ -44,5 +41,10 @@ Feel free to do whatever you want with it
 # And you can dynamically specify version numbers. We automatically use the highest version found
 # (VERSION-4 is Mayor; VERSION-3 is Minor; VERSION-2 is PATCH and VERSION-1 is BUILD)
 # But you can specify as many parts of the version number as you want
-<?vLabel="MyHDD">Filme\jClipCorn {VERSION-3}-{VERSION-2}-{VERSION-1}.jar
+<?vLabel="MyHDD">Filme\jClipCorn {VERSION-3}.{VERSION-2}.{VERSION-1}.jar
 ~~~
+
+
+##Download
+
+Download via the [GitHub Releases page](https://github.com/Mikescher/jClipCornLink/releases) or clone and compile it yourself ;)
