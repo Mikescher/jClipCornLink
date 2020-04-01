@@ -56,8 +56,7 @@ namespace jClipCornLink
 				return;
 			}
 
-			string rule;
-			var file = FindPath(lines, out rule);
+			var file = FindPath(lines, out var rule);
 
 			if (file != null)
 			{
@@ -146,7 +145,7 @@ namespace jClipCornLink
 
 					if (!match.Success) continue;
 
-					string v = string.Join(":", dynamics.Select(d => match.Groups[rex.Item2[d]].Value).Select(int.Parse).Select(p => string.Format("{0:00000000}", p)));
+					string v = string.Join(":", dynamics.Select(d => match.Groups[rex.Item2[d]].Value).Select(int.Parse).Select(p => $"{p:00000000}"));
 
 					foundTuples.Add(Tuple.Create(foundFile, v));
 				}
@@ -223,17 +222,25 @@ namespace jClipCornLink
 
 				if (rule.Trim().StartsWith("#") || rule.Trim().StartsWith("//") || rule.Trim().StartsWith(";")) continue;
 
-				var file = ResolvePath(rule);
-				var priorityFile = ResolveDynamics(file);
+				try
+				{
+					var file = ResolvePath(rule);
+					var priorityFile = ResolveDynamics(file);
 
-				if (priorityFile != null)
-				{
-					foundrule = rule;
-					return priorityFile;
+					if (priorityFile != null)
+					{
+						foundrule = rule;
+						return priorityFile;
+					}
+					else
+					{
+						WriteLogError($"File not found: '{file}' (configured path: '{rule}')");
+					}
 				}
-				else
+				catch (Exception e)
 				{
-					WriteLogError(string.Format("File not found: '{0}' (configured path: '{1}')", file, rule));
+					WriteLogError($"Error in reolve rule: '{rule}': {e.Message}\r\n{e.StackTrace}");
+					continue;
 				}
 			}
 
