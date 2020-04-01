@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Xml.Linq;
 
 namespace jClipCornLink
 {
@@ -25,7 +26,7 @@ namespace jClipCornLink
 		private static readonly string SELF_DRIVE = Directory.GetDirectoryRoot(Directory.GetCurrentDirectory());
 		private static readonly List<DriveInfo> DRIVES = DriveInfo.GetDrives().Where(p => p.IsReady).ToList();
 
-
+		private static bool ShowErrorBoxes = false;
 
 		[STAThread]
 		static void Main()
@@ -36,7 +37,7 @@ namespace jClipCornLink
 			}
 			catch (Exception e)
 			{
-				WriteLogError(string.Format("jClipCornLink encountered an exception: {0}:\r\n{1}", e, e.StackTrace));
+				WriteLogError($"jClipCornLink encountered an exception: {e}:\r\n{e.StackTrace}");
 			}
 		}
 
@@ -56,52 +57,122 @@ namespace jClipCornLink
 				return;
 			}
 
-			var file = FindPath(lines, out var rule);
+            var map = new Dictionary<string, string>
+            {
+                ["java"]      = "java.exe",
+                ["showerror"] = "false",
+            };
 
-			if (file != null)
+            try
 			{
-				if (file.EndsWith(".jar"))
-				{
-					Process.Start(new ProcessStartInfo("java.exe", "-jar \"" + file + "\"")
-					{
-						CreateNoWindow = true,
-						UseShellExecute = false,
+				ReadOptions(lines, map);
 
-						WorkingDirectory = Directory.GetParent(file).FullName,
-					});
+                ShowErrorBoxes = (map["showerror"] == "true");
 
-					WriteLogInfo(string.Format("Start jClipCorn (jar): '{0}' (configured path: '{1}')", file, rule));
-					return;
-				}
-				if (file.EndsWith(".exe"))
-				{
-					Process.Start(new ProcessStartInfo(file)
-					{
-						WorkingDirectory = Directory.GetParent(file).FullName,
-					});
+				var file = FindPath(lines, out var rule);
 
-					WriteLogInfo(string.Format("Start jClipCorn (exe): '{0}' (configured path: '{1}')", file, rule));
-					return;
-				}
+                if (file != null)
+                {
+                    if (file.EndsWith(".jar"))
+                    {
+                        Process.Start(new ProcessStartInfo(map["java"], "-jar \"" + file + "\"")
+                        {
+                            CreateNoWindow = true,
+                            UseShellExecute = false,
 
-				WriteLogError(string.Format("Unknown extension: '{0}' (configured path: '{1}')", file, rule));
+                            WorkingDirectory = Directory.GetParent(file).FullName,
+                        });
+
+                        WriteLogInfo($"Start jClipCorn (jar): '{file}' (configured path: '{rule}')");
+                        return;
+                    }
+                    if (file.EndsWith(".exe"))
+                    {
+                        Process.Start(new ProcessStartInfo(file)
+                        {
+                            WorkingDirectory = Directory.GetParent(file).FullName,
+                        });
+
+                        WriteLogInfo($"Start jClipCorn (exe): '{file}' (configured path: '{rule}')");
+                        return;
+                    }
+
+                    WriteLogError($"Unknown extension: '{file}' (configured path: '{rule}')");
+                }
+
+                WriteLogError("Unable to locate jClipCorn - exiting");
 			}
+            catch (Exception e)
+			{
+				WriteLogError($"jClipCornLink encountered an exception: {e}:\r\n{e.StackTrace}");
+				return;
+			}
+		}
 
-			WriteLogError("Unable to locate jClipCorn - exiting");
+		private static void ReadOptions(List<string> lines, Dictionary<string, string> map)
+		{
+            foreach (var refline in lines)
+            {
+                var line = refline.Trim();
+
+				if (!line.StartsWith("#[")) continue;
+                if (!line.EndsWith("]")) continue;
+
+				line = line.Substring(2, line.Length - 3);
+
+				var eqidx = line.IndexOf('=');
+
+				var key = line.Substring(0, eqidx).Trim().ToLower();
+				var val = line.Substring(eqidx + 1).Trim();
+
+				if (val.StartsWith("\"") && val.EndsWith("\"")) val = val.Substring(1, val.Length-2);
+
+				map[key] = val;
+			}
 		}
 
 		private static void WriteLogError(string logline)
 		{
+            Console.Error.WriteLine(logline);
+
 			if (!File.Exists(PATH_LOG)) File.WriteAllText(PATH_LOG, string.Empty);
 
-			File.AppendAllText(PATH_LOG, string.Format("\r\n\r\n[ERROR] [{0:yyyy-MM-dd HH:mm:ss}] {1}", DateTime.Now, logline), Encoding.UTF8);
+			File.AppendAllText(PATH_LOG, $"\r\n\r\n[ERROR] [{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {logline}", Encoding.UTF8);
+
+			if (ShowErrorBoxes) ShowExtMessage("Error", logline);
 		}
+
+        private static void ShowExtMessage(string title, string msg)
+        {
+            try
+			{
+				var path = Path.GetTempFileName();
+                File.WriteAllText(path, msg);
+
+                var p = new Process
+                {
+                    StartInfo = new ProcessStartInfo
+                    {
+                        FileName = "SimpleMessagePresenter.exe",
+                        Arguments = $"\"{title.Replace('"', '\'')}\" \"{path}\"",
+                    }
+                };
+
+                p.Start();
+			}
+            catch (Exception e)
+            {
+                Console.Error.WriteLine(e);
+            }
+        }
 
 		private static void WriteLogInfo(string logline)
 		{
+            Console.Out.WriteLine(logline);
+
 			if (!File.Exists(PATH_LOG)) File.WriteAllText(PATH_LOG, string.Empty);
 
-			File.AppendAllText(PATH_LOG, string.Format("\r\n\r\n[INFO]  [{0:yyyy-MM-dd HH:mm:ss}] {1}", DateTime.Now, logline), Encoding.UTF8);
+			File.AppendAllText(PATH_LOG, $"\r\n\r\n[INFO]  [{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {logline}", Encoding.UTF8);
 		}
 
 		private static string ResolvePath(string relPath)
@@ -170,7 +241,7 @@ namespace jClipCornLink
 			foreach (var dnmic in dynamics)
 			{
 				string g = "GROUP_" + (idxId++);
-				filename = filename.Replace(dnmic, string.Format("(?<{0}>[0-9]+)", g));
+				filename = filename.Replace(dnmic, $"(?<{g}>[0-9]+)");
 
 				dict.Add(dnmic, g);
 			}
