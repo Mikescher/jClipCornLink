@@ -61,6 +61,7 @@ namespace jClipCornLink
             {
                 ["java"]      = "java.exe",
                 ["showerror"] = "false",
+				["net_use"]   = "",
             };
 
             try
@@ -68,6 +69,8 @@ namespace jClipCornLink
 				ReadOptions(lines, map);
 
                 ShowErrorBoxes = (map["showerror"] == "true");
+
+				if (!string.IsNullOrWhiteSpace(map["net_use"])) ExecuteNetUse(map["net_use"].Split('\t'));
 
 				var file = FindPath(lines, out var rule);
 
@@ -109,6 +112,16 @@ namespace jClipCornLink
 			}
 		}
 
+		private static void ExecuteNetUse(string[] uncs)
+		{
+			foreach (var uncpath in uncs)
+			{
+				var output = ProcessHelper.ProcExecute("net", $"use \"{uncpath}\"");
+
+				if (output.ExitCode != 0) WriteLogError($"net use failed with exit code [{output.ExitCode}]: \r\n{output.StdCombined}");
+			}
+		}
+
 		private static void ReadOptions(List<string> lines, Dictionary<string, string> map)
 		{
             foreach (var refline in lines)
@@ -120,6 +133,13 @@ namespace jClipCornLink
 
 				line = line.Substring(2, line.Length - 3);
 
+				var append = false;
+				if (line.StartsWith("[") && line.EndsWith("]"))
+				{
+					line = line.Substring(2, line.Length - 3);
+					append = true;
+				}
+
 				var eqidx = line.IndexOf('=');
 
 				var key = line.Substring(0, eqidx).Trim().ToLower();
@@ -127,11 +147,19 @@ namespace jClipCornLink
 
 				if (val.StartsWith("\"") && val.EndsWith("\"")) val = val.Substring(1, val.Length-2);
 
-				map[key] = val;
+				if (append)
+				{
+					if (map.ContainsKey(key) && map[key] != "") map[key] += "\t" + val;
+					else map[key] = val;
+				}
+				else
+				{
+					map[key] = val;
+				}
 			}
 		}
 
-		private static void WriteLogError(string logline)
+		private static void WriteLogError(string logline, bool noshow = false)
 		{
             Console.Error.WriteLine(logline);
 
@@ -139,7 +167,7 @@ namespace jClipCornLink
 
 			File.AppendAllText(PATH_LOG, $"\r\n\r\n[ERROR] [{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {logline}", Encoding.UTF8);
 
-			if (ShowErrorBoxes) ShowExtMessage("Error", logline);
+			if (ShowErrorBoxes && !noshow) ShowExtMessage("Error", logline);
 		}
 
         private static void ShowExtMessage(string title, string msg)
@@ -206,19 +234,26 @@ namespace jClipCornLink
 
 				var foundTuples = new List<Tuple<string, string>>();
 
-				foreach (var foundFile in Directory.EnumerateFiles(path, pattern))
+				try
 				{
-					string fn = Path.GetFileName(foundFile);
+					foreach (var foundFile in Directory.EnumerateFiles(path, pattern))
+					{
+						string fn = Path.GetFileName(foundFile);
 
-					if (fn == null) continue;
+						if (fn == null) continue;
 
-					var match = rex.Item1.Match(fn);
+						var match = rex.Item1.Match(fn);
 
-					if (!match.Success) continue;
+						if (!match.Success) continue;
 
-					string v = string.Join(":", dynamics.Select(d => match.Groups[rex.Item2[d]].Value).Select(int.Parse).Select(p => $"{p:00000000}"));
+						string v = string.Join(":", dynamics.Select(d => match.Groups[rex.Item2[d]].Value).Select(int.Parse).Select(p => $"{p:00000000}"));
 
-					foundTuples.Add(Tuple.Create(foundFile, v));
+						foundTuples.Add(Tuple.Create(foundFile, v));
+					}
+				}
+				catch (DirectoryNotFoundException)
+				{
+					return null;
 				}
 
 				if (! foundTuples.Any()) return null;
@@ -305,12 +340,12 @@ namespace jClipCornLink
 					}
 					else
 					{
-						WriteLogError($"File not found: '{file}' (configured path: '{rule}')");
+						WriteLogError($"File not found: '{file}' (configured path: '{rule}')", true);
 					}
 				}
 				catch (Exception e)
 				{
-					WriteLogError($"Error in reolve rule: '{rule}': {e.Message}\r\n{e.StackTrace}");
+					WriteLogError($"Error in resolve rule: '{rule}': {e.Message}\r\n{e.StackTrace}");
 					continue;
 				}
 			}
