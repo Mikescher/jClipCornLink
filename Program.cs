@@ -251,8 +251,14 @@ namespace jClipCornLink
 						foundTuples.Add(Tuple.Create(foundFile, v));
 					}
 				}
-				catch (DirectoryNotFoundException)
+				catch (ArgumentException e)
 				{
+					WriteLogError($"path: Directory.EnumerateFiles('{path}', '{pattern}'):\r\n" + e.ToString(), true);
+					return null;
+				}
+				catch (DirectoryNotFoundException e)
+				{
+					WriteLogError($"path: Directory.EnumerateFiles('{path}', '{pattern}'):\r\n" + e.ToString(), true);
 					return null;
 				}
 
@@ -320,7 +326,7 @@ namespace jClipCornLink
 			return result.OrderByDescending(p => int.Parse(REGEX_DYN_VERSION.Match(p).Groups["index"].Value)).ToList();
 		} 
 
-		private static String FindPath(List<string> rules, out string foundrule)
+		private static string FindPath(List<string> rules, out string foundrule)
 		{
 			foreach (var rule in rules)
 			{
