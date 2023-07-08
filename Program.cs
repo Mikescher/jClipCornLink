@@ -10,10 +10,11 @@ using System.Xml.Linq;
 namespace jClipCornLink
 {
 	static class Program
-	{
-		private static readonly string PATH_APPDATA = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-		private static readonly string PATH_CONFIG = Path.Combine(PATH_APPDATA, "jClipCorn", "jClipCornLink.cfg");
-		private static readonly string PATH_LOG = Path.Combine(PATH_APPDATA, "jClipCorn", "jClipCornLink.log");
+    {
+        private static readonly string SELF_PATH = Directory.GetCurrentDirectory();
+
+		private static readonly string PATH_CONFIG = Path.Combine(SELF_PATH, "jClipCornLink.cfg");
+		private static readonly string PATH_LOG = Path.Combine(SELF_PATH, "jClipCornLink.log");
 
 		private static readonly Regex REGEX_DRIVENAME   = new Regex(@"<\?vLabel=""(?<param>[^\""]+?)"">");
 		private static readonly Regex REGEX_DRIVELETTER = new Regex(@"<\?vLetter=""(?<param>[A-Z])"">");
@@ -22,7 +23,6 @@ namespace jClipCornLink
 		private static readonly Regex REGEX_DYN_VERSION = new Regex(@"^\{VERSION\-(?<index>[0-9]+)\}$");
 		private static readonly Regex REGEX_DYNAMIC     = new Regex(@"\{.*?\}");
 
-		private static readonly string SELF_PATH = Directory.GetCurrentDirectory();
 		private static readonly string SELF_DRIVE = Directory.GetDirectoryRoot(Directory.GetCurrentDirectory());
 		private static readonly List<DriveInfo> DRIVES = DriveInfo.GetDrives().Where(p => p.IsReady).ToList();
 
@@ -30,8 +30,14 @@ namespace jClipCornLink
 
 		[STAThread]
 		static void Main()
-		{
-			try
+        {
+            Console.Out.WriteLine("[STARTUP]");
+            Console.Out.WriteLine($"[CONFIG] SELF_PATH   := {SELF_PATH}");
+            Console.Out.WriteLine($"[CONFIG] SELF_DRIVE  := {SELF_DRIVE}");
+            Console.Out.WriteLine($"[CONFIG] PATH_CONFIG := {PATH_CONFIG}");
+            Console.Out.WriteLine($"[CONFIG] PATH_LOG    := {PATH_LOG}");
+
+            try
 			{
 				Run();
 			}
@@ -39,17 +45,30 @@ namespace jClipCornLink
 			{
 				WriteLogError($"jClipCornLink encountered an exception: {e}:\r\n{e.StackTrace}");
 			}
+			
+			Console.Out.WriteLine("[DONE]");
 		}
 
 		private static void Run()
 		{
 			Directory.CreateDirectory(Directory.GetParent(PATH_CONFIG).FullName);
-			if (!File.Exists(PATH_CONFIG)) File.WriteAllText(PATH_CONFIG, string.Empty);
+			if (!File.Exists(PATH_CONFIG))
+			{
+				Console.Out.WriteLine($"[DEBUG] Create config file '{PATH_CONFIG}'");
+				File.WriteAllText(PATH_CONFIG, string.Empty);
+			}
 
 			Directory.CreateDirectory(Directory.GetParent(PATH_LOG).FullName);
-			if (!File.Exists(PATH_LOG)) File.WriteAllText(PATH_LOG, string.Empty);
+			if (!File.Exists(PATH_LOG))
+			{
+				Console.Out.WriteLine($"[DEBUG] Create log file '{PATH_LOG}'");
+				File.WriteAllText(PATH_LOG, string.Empty);
+			}
 
+			Console.Out.WriteLine($"[DEBUG] Read config file '{PATH_CONFIG}'");
 			var lines = File.ReadAllLines(PATH_CONFIG).ToList();
+			
+			Console.Out.WriteLine($"[DEBUG] Read {lines.Count} lines from config");
 
 			if (!lines.Any())
 			{
@@ -70,14 +89,25 @@ namespace jClipCornLink
 
                 ShowErrorBoxes = (map["showerror"] == "true");
 
-				if (!string.IsNullOrWhiteSpace(map["net_use"])) ExecuteNetUse(map["net_use"].Split('\t'));
+                Console.Out.WriteLine($"[DEBUG] Options:\n{string.Join("\n", map.Select(p => p.Key + "  =>  " + p.Value))}");
+
+				if (!string.IsNullOrWhiteSpace(map["net_use"]))
+				{
+					Console.Out.WriteLine($"[DEBUG] Run net_use: '{map["net_use"]}'");
+
+					ExecuteNetUse(map["net_use"].Split('\t'));
+				}
 
 				var file = FindPath(lines, out var rule);
 
                 if (file != null)
                 {
+	                Console.Out.WriteLine($"[DEBUG] Found path '{file}' in rule '{rule}'");
+
                     if (file.EndsWith(".jar"))
                     {
+	                    Console.Out.WriteLine($"[DEBUG] Execute {map["java"]} -jar \"{file}\"");
+
                         Process.Start(new ProcessStartInfo(map["java"], "-jar \"" + file + "\"")
                         {
                             CreateNoWindow = true,
@@ -91,6 +121,8 @@ namespace jClipCornLink
                     }
                     if (file.EndsWith(".exe"))
                     {
+	                    Console.Out.WriteLine($"[DEBUG] Execute \"{file}\"");
+
                         Process.Start(new ProcessStartInfo(file)
                         {
                             WorkingDirectory = Directory.GetParent(file).FullName,
@@ -101,6 +133,10 @@ namespace jClipCornLink
                     }
 
                     WriteLogError($"Unknown extension: '{file}' (configured path: '{rule}')");
+                }
+                else
+                {
+	                Console.Out.WriteLine($"[DEBUG] Found no path");
                 }
 
                 WriteLogError("Unable to locate jClipCorn - exiting");
@@ -116,6 +152,8 @@ namespace jClipCornLink
 		{
 			foreach (var uncpath in uncs)
 			{
+				Console.Out.WriteLine($"[DEBUG] Execute net use \"{uncpath}\"");
+				
 				var output = ProcessHelper.ProcExecute("net", $"use \"{uncpath}\"");
 
 				if (output.ExitCode != 0) WriteLogError($"net use failed with exit code [{output.ExitCode}]: \r\n{output.StdCombined}");
@@ -127,6 +165,8 @@ namespace jClipCornLink
             foreach (var refline in lines)
             {
                 var line = refline.Trim();
+                
+                Console.Out.WriteLine($"[DEBUG] Parse line '{line}'");
 
 				if (!line.StartsWith("#[")) continue;
                 if (!line.EndsWith("]")) continue;
@@ -149,11 +189,15 @@ namespace jClipCornLink
 
 				if (append)
 				{
+					Console.Out.WriteLine($"[DEBUG] Append config '{key}' with '{val}'");
+					
 					if (map.ContainsKey(key) && map[key] != "") map[key] += "\t" + val;
 					else map[key] = val;
 				}
 				else
 				{
+					Console.Out.WriteLine($"[DEBUG] Set config '{key}' to '{val}'");
+
 					map[key] = val;
 				}
 			}
@@ -161,7 +205,7 @@ namespace jClipCornLink
 
 		private static void WriteLogError(string logline, bool noshow = false)
 		{
-            Console.Error.WriteLine(logline);
+            Console.Out.WriteLine("[ERROR-LOG] " + logline);
 
 			if (!File.Exists(PATH_LOG)) File.WriteAllText(PATH_LOG, string.Empty);
 
@@ -177,6 +221,8 @@ namespace jClipCornLink
 				var path = Path.GetTempFileName();
                 File.WriteAllText(path, msg);
 
+                Console.Out.WriteLine($"[DEBUG] Execute SimpleMessagePresenter \"{title.Replace('"', '\'')}\" \"{path}\"");
+                
                 var p = new Process
                 {
                     StartInfo = new ProcessStartInfo
@@ -196,7 +242,7 @@ namespace jClipCornLink
 
 		private static void WriteLogInfo(string logline)
 		{
-            Console.Out.WriteLine(logline);
+			Console.Out.WriteLine("[INFO-LOG] " + logline);
 
 			if (!File.Exists(PATH_LOG)) File.WriteAllText(PATH_LOG, string.Empty);
 
@@ -214,7 +260,7 @@ namespace jClipCornLink
 			return relPath;
 		}
 
-		private static string ResolveDynamics(string file)
+		private static string ResolveDynamicsAndCheckFile(string file)
 		{
 			int idxS = file.LastIndexOf('\\');
 			int idxE = file.LastIndexOf('.');
@@ -268,7 +314,9 @@ namespace jClipCornLink
 			}
 			else
 			{
-				return file;
+				if (File.Exists(file)) return file;
+
+				return null;
 			}
 		}
 
@@ -336,11 +384,17 @@ namespace jClipCornLink
 
 				try
 				{
+					Console.Out.WriteLine($"[DEBUG] Evaluate path-rule '{rule}'");
+					
 					var file = ResolvePath(rule);
-					var priorityFile = ResolveDynamics(file);
+					var priorityFile = ResolveDynamicsAndCheckFile(file);
+
+					Console.Out.WriteLine($"[DEBUG] Rule '{rule}' evaluated to {{file: '{file}', priority: '{priorityFile}'}}");
 
 					if (priorityFile != null)
 					{
+						Console.Out.WriteLine($"[DEBUG] Chosen Path '{priorityFile}' (priorityFile)");
+
 						foundrule = rule;
 						return priorityFile;
 					}
@@ -355,6 +409,8 @@ namespace jClipCornLink
 					continue;
 				}
 			}
+
+			Console.Out.WriteLine($"[DEBUG] Found no matching files");
 
 			foundrule = null;
 			return null;
